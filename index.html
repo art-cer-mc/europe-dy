@@ -5,6 +5,19 @@
     <link rel="preconnect" href="//cdn-eu.dynamicyield.com">
     <link rel="preconnect" href="//st-eu.dynamicyield.com">
     <link rel="preconnect" href="//rcom-eu.dynamicyield.com">
+    const setOptanonCookie = (val) => {
+	DY.userActiveConsent = {
+		accepted: val
+	};
+	DYO.ActiveConsent.updateConsentAcceptedStatus(val);
+
+	try {
+		window.localStorage.setItem("userActiveConsent", val);
+	}
+	catch (e) {
+		console.error("We couldn't save the value of the consent"); 
+	}
+};
     <script type="text/javascript">
         window.DY = window.DY || {};
         DY.recommendationContext = {type: 'HOMEPAGE'};
