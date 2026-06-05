@@ -2,537 +2,101 @@
 <html lang="en">
 <head>
     <link rel="stylesheet" href="styles.css">
-
     <link rel="preconnect" href="//cdn-eu.dynamicyield.com">
     <link rel="preconnect" href="//st-eu.dynamicyield.com">
     <link rel="preconnect" href="//rcom-eu.dynamicyield.com">
 
-    <script type="text/javascript">
-        window.DY = window.DY || {};
-        DY.recommendationContext = {
-            type: "HOMEPAGE",
-            data: []
-        };
-    </script>
-
-    <!--
-        Defensive DY.jsession persistence layer.
-
-        Purpose:
-        - If DY.jsession is generated but disappears on reload,
-          this mirrors it into localStorage and restores it before DY loads.
-
-        Important:
-        - This only works if DY.jsession is readable/writable via document.cookie.
-        - It will not work for HttpOnly cookies.
-        - This is mainly useful for controlled testing environments.
-    -->
+    <!-- ✅ DY jsession persistence — runs before DY scripts -->
     <script type="text/javascript">
         (function () {
-            "use strict";
-
-            const CONFIG = {
-                cookieName: "DY.jsession",
-                storageKey: "DY.jsession",
-                metadataStorageKey: "DY.jsession.meta",
-
-                /*
-                  How long to keep a stored DY.jsession value.
-
-                  This is defensive because session identifiers should not be
-                  kept forever in localStorage.
-
-                  30 minutes = 30 * 60 * 1000
-                */
-                maxStorageAgeMs: 30 * 60 * 1000,
-
-                /*
-                  Watch for DY creating/updating the cookie after its scripts load.
-                */
-                syncIntervalMs: 250,
-                maxSyncAttempts: 80,
-
-                /*
-                  If true, logs debug messages to the console.
-                */
-                debug: true
-            };
-
-            function log() {
-                if (!CONFIG.debug) return;
-                console.log.apply(console, ["[DY.jsession persistence]"].concat(Array.from(arguments)));
-            }
-
-            function warn() {
-                if (!CONFIG.debug) return;
-                console.warn.apply(console, ["[DY.jsession persistence]"].concat(Array.from(arguments)));
-            }
-
-            function error() {
-                console.error.apply(console, ["[DY.jsession persistence]"].concat(Array.from(arguments)));
-            }
-
-            function safeJsonParse(value, fallback) {
-                try {
-                    return value ? JSON.parse(value) : fallback;
-                } catch (e) {
-                    warn("Failed to parse JSON from storage.", e);
-                    return fallback;
-                }
-            }
-
-            function isStorageAvailable() {
-                try {
-                    const testKey = "__dy_storage_test__";
-                    window.localStorage.setItem(testKey, "1");
-                    window.localStorage.removeItem(testKey);
-                    return true;
-                } catch (e) {
-                    warn("localStorage is not available.", e);
-                    return false;
-                }
-            }
-
-            function canUseCookies() {
-                try {
-                    const testName = "__dy_cookie_test__";
-                    document.cookie = testName + "=1; path=/; SameSite=Lax";
-                    const exists = document.cookie.indexOf(testName + "=1") !== -1;
-                    document.cookie = testName + "=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
-                    return exists;
-                } catch (e) {
-                    warn("Cookies are not available.", e);
-                    return false;
-                }
-            }
-
-            function escapeRegex(value) {
-                return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            }
+            var COOKIE_NAME = '_dyjsession';
+            var LS_KEY = 'dy_jsession_backup';
 
             function getCookie(name) {
+                var match = document.cookie.match(
+                    new RegExp('(?:^|; )' + name + '=([^;]*)')
+                );
+                return match ? decodeURIComponent(match[1]) : null;
+            }
+
+            function setCookie(name, value, days) {
+                var date = new Date();
+                date.setTime(date.getTime() + days * 86400000);
+                document.cookie =
+                    name + '=' + encodeURIComponent(value) +
+                    '; expires=' + date.toUTCString() +
+                    '; path=/; SameSite=Lax';
+            }
+
+            // RESTORE: set cookie from localStorage only if cookie is missing
+            var existingCookie = getCookie(COOKIE_NAME);
+
+            if (!existingCookie) {
                 try {
-                    const escapedName = escapeRegex(name);
-                    const match = document.cookie.match(
-                        new RegExp("(?:^|; )" + escapedName + "=([^;]*)")
-                    );
-
-                    return match ? decodeURIComponent(match[1]) : null;
+                    var saved = localStorage.getItem(LS_KEY);
+                    if (saved) {
+                        setCookie(COOKIE_NAME, saved, 365);
+                        console.log('[DY jsession] Restored from localStorage:', saved);
+                    } else {
+                        console.log('[DY jsession] No saved value in localStorage yet.');
+                    }
                 } catch (e) {
-                    error("Failed reading cookie:", name, e);
-                    return null;
+                    console.error('[DY jsession] localStorage read failed:', e);
                 }
+            } else {
+                console.log('[DY jsession] Cookie already present — no restore needed.');
             }
 
-            function setCookie(name, value, options) {
-                try {
-                    if (!name || !value) {
-                        warn("setCookie skipped because name or value is missing.");
-                        return false;
+            // SAVE: poll for cookie after DY sets it, then back it up
+            var attempts = 0;
+            var maxAttempts = 50;
+            var pollInterval = setInterval(function () {
+                attempts++;
+                var value = getCookie(COOKIE_NAME);
+                if (value) {
+                    try {
+                        localStorage.setItem(LS_KEY, value);
+                        console.log('[DY jsession] Backed up to localStorage:', value);
+                    } catch (e) {
+                        console.error('[DY jsession] localStorage write failed:', e);
                     }
-
-                    const cookieOptions = Object.assign({
-                        path: "/",
-                        sameSite: "Lax",
-                        secure: window.location.protocol === "https:"
-                    }, options || {});
-
-                    let cookieString =
-                        encodeURIComponent(name) +
-                        "=" +
-                        encodeURIComponent(value);
-
-                    if (cookieOptions.path) {
-                        cookieString += "; path=" + cookieOptions.path;
-                    }
-
-                    if (cookieOptions.sameSite) {
-                        cookieString += "; SameSite=" + cookieOptions.sameSite;
-                    }
-
-                    if (cookieOptions.secure) {
-                        cookieString += "; Secure";
-                    }
-
-                    /*
-                      Do not set an explicit expires/max-age here by default.
-                      DY.jsession is a session-like value, so we keep it as a
-                      session cookie when restoring it.
-                    */
-                    document.cookie = cookieString;
-
-                    const restoredValue = getCookie(name);
-                    const success = restoredValue === value;
-
-                    if (!success) {
-                        warn("Cookie write attempted, but verification failed.", {
-                            name: name,
-                            expected: value,
-                            actual: restoredValue
-                        });
-                    }
-
-                    return success;
-                } catch (e) {
-                    error("Failed setting cookie:", name, e);
-                    return false;
+                    clearInterval(pollInterval);
+                } else if (attempts >= maxAttempts) {
+                    console.warn('[DY jsession] Cookie not found after ' + maxAttempts + ' polls.');
+                    clearInterval(pollInterval);
                 }
-            }
-
-            function removeStorageValue() {
-                try {
-                    window.localStorage.removeItem(CONFIG.storageKey);
-                    window.localStorage.removeItem(CONFIG.metadataStorageKey);
-                    log("Removed stored DY.jsession value and metadata.");
-                    return true;
-                } catch (e) {
-                    error("Failed removing DY.jsession from localStorage.", e);
-                    return false;
-                }
-            }
-
-            function getStoredValueWithMeta() {
-                try {
-                    const value = window.localStorage.getItem(CONFIG.storageKey);
-                    const meta = safeJsonParse(
-                        window.localStorage.getItem(CONFIG.metadataStorageKey),
-                        null
-                    );
-
-                    if (!value) {
-                        return {
-                            value: null,
-                            meta: null,
-                            isExpired: false
-                        };
-                    }
-
-                    const savedAt = meta && typeof meta.savedAt === "number"
-                        ? meta.savedAt
-                        : null;
-
-                    const ageMs = savedAt ? Date.now() - savedAt : null;
-                    const isExpired = ageMs !== null && ageMs > CONFIG.maxStorageAgeMs;
-
-                    return {
-                        value: value,
-                        meta: meta,
-                        ageMs: ageMs,
-                        isExpired: isExpired
-                    };
-                } catch (e) {
-                    error("Failed reading stored DY.jsession.", e);
-
-                    return {
-                        value: null,
-                        meta: null,
-                        isExpired: false
-                    };
-                }
-            }
-
-            function saveCookieToStorage(reason) {
-                try {
-                    const cookieValue = getCookie(CONFIG.cookieName);
-
-                    if (!cookieValue) {
-                        log("No DY.jsession cookie found to save.", {
-                            reason: reason || "unspecified"
-                        });
-                        return false;
-                    }
-
-                    const currentStored = getStoredValueWithMeta();
-
-                    if (currentStored.value === cookieValue && !currentStored.isExpired) {
-                        log("Stored DY.jsession is already up to date.", {
-                            reason: reason || "unspecified"
-                        });
-                        return true;
-                    }
-
-                    const metadata = {
-                        savedAt: Date.now(),
-                        savedAtIso: new Date().toISOString(),
-                        source: reason || "cookie-sync",
-                        pageUrl: window.location.href,
-                        cookieName: CONFIG.cookieName
-                    };
-
-                    window.localStorage.setItem(CONFIG.storageKey, cookieValue);
-                    window.localStorage.setItem(CONFIG.metadataStorageKey, JSON.stringify(metadata));
-
-                    log("Saved DY.jsession cookie to localStorage.", {
-                        reason: reason || "unspecified",
-                        value: cookieValue,
-                        metadata: metadata
-                    });
-
-                    return true;
-                } catch (e) {
-                    error("Failed saving DY.jsession cookie to localStorage.", e);
-                    return false;
-                }
-            }
-
-            function restoreStorageToCookie(reason) {
-                try {
-                    const existingCookieValue = getCookie(CONFIG.cookieName);
-                    const stored = getStoredValueWithMeta();
-
-                    if (existingCookieValue) {
-                        log("Restore skipped because DY.jsession cookie already exists.", {
-                            reason: reason || "unspecified",
-                            cookieValue: existingCookieValue
-                        });
-
-                        /*
-                          If cookie exists and storage is empty/stale/different,
-                          use the live cookie as the source of truth.
-                        */
-                        if (!stored.value || stored.value !== existingCookieValue || stored.isExpired) {
-                            saveCookieToStorage("cookie-existed-during-restore");
-                        }
-
-                        return {
-                            restored: false,
-                            reason: "cookie-already-exists",
-                            cookieValue: existingCookieValue
-                        };
-                    }
-
-                    if (!stored.value) {
-                        log("Restore skipped because no DY.jsession value exists in localStorage.", {
-                            reason: reason || "unspecified"
-                        });
-
-                        return {
-                            restored: false,
-                            reason: "no-stored-value"
-                        };
-                    }
-
-                    if (stored.isExpired) {
-                        warn("Stored DY.jsession is expired. Removing it instead of restoring.", {
-                            ageMs: stored.ageMs,
-                            maxStorageAgeMs: CONFIG.maxStorageAgeMs,
-                            meta: stored.meta
-                        });
-
-                        removeStorageValue();
-
-                        return {
-                            restored: false,
-                            reason: "stored-value-expired"
-                        };
-                    }
-
-                    const success = setCookie(CONFIG.cookieName, stored.value);
-
-                    if (success) {
-                        log("Restored DY.jsession cookie from localStorage.", {
-                            reason: reason || "unspecified",
-                            value: stored.value,
-                            meta: stored.meta
-                        });
-
-                        return {
-                            restored: true,
-                            reason: "restored-from-local-storage",
-                            cookieValue: stored.value
-                        };
-                    }
-
-                    warn("Restore attempted but cookie verification failed.", {
-                        reason: reason || "unspecified",
-                        storedValue: stored.value
-                    });
-
-                    return {
-                        restored: false,
-                        reason: "cookie-write-verification-failed"
-                    };
-                } catch (e) {
-                    error("Failed restoring DY.jsession from localStorage.", e);
-
-                    return {
-                        restored: false,
-                        reason: "exception",
-                        error: e
-                    };
-                }
-            }
-
-            function startCookieSyncWatcher() {
-                try {
-                    let attempts = 0;
-                    let lastObservedCookieValue = getCookie(CONFIG.cookieName);
-
-                    log("Starting DY.jsession cookie sync watcher.", {
-                        initialCookieValue: lastObservedCookieValue,
-                        intervalMs: CONFIG.syncIntervalMs,
-                        maxAttempts: CONFIG.maxSyncAttempts
-                    });
-
-                    const intervalId = window.setInterval(function () {
-                        attempts++;
-
-                        const currentCookieValue = getCookie(CONFIG.cookieName);
-
-                        if (currentCookieValue && currentCookieValue !== lastObservedCookieValue) {
-                            lastObservedCookieValue = currentCookieValue;
-                            saveCookieToStorage("watcher-detected-cookie-change");
-                        }
-
-                        /*
-                          If DY generated the cookie but it is the same as last observed,
-                          still attempt one save in case localStorage was empty.
-                        */
-                        if (currentCookieValue) {
-                            const stored = getStoredValueWithMeta();
-
-                            if (!stored.value || stored.value !== currentCookieValue || stored.isExpired) {
-                                saveCookieToStorage("watcher-cookie-present-storage-not-current");
-                            }
-                        }
-
-                        if (attempts >= CONFIG.maxSyncAttempts) {
-                            window.clearInterval(intervalId);
-
-                            log("Stopped DY.jsession cookie sync watcher.", {
-                                attempts: attempts,
-                                finalCookieValue: getCookie(CONFIG.cookieName),
-                                finalStoredValue: getStoredValueWithMeta()
-                            });
-                        }
-                    }, CONFIG.syncIntervalMs);
-
-                    return intervalId;
-                } catch (e) {
-                    error("Failed starting DY.jsession sync watcher.", e);
-                    return null;
-                }
-            }
-
-            function initializeDYJSessionPersistence() {
-                const storageAvailable = isStorageAvailable();
-                const cookiesAvailable = canUseCookies();
-
-                if (!storageAvailable) {
-                    warn("DY.jsession persistence disabled because localStorage is unavailable.");
-                    return;
-                }
-
-                if (!cookiesAvailable) {
-                    warn("DY.jsession persistence disabled because cookies are unavailable.");
-                    return;
-                }
-
-                /*
-                  This is the critical part:
-                  restore before Dynamic Yield scripts load.
-                */
-                const restoreResult = restoreStorageToCookie("before-dy-load");
-
-                log("Initialization restore result:", restoreResult);
-
-                /*
-                  Start early watcher too, because some DY scripts may create
-                  the cookie before window load.
-                */
-                startCookieSyncWatcher();
-
-                /*
-                  Run again on DOMContentLoaded and load for extra coverage.
-                */
-                window.addEventListener("DOMContentLoaded", function () {
-                    saveCookieToStorage("dom-content-loaded");
-                });
-
-                window.addEventListener("load", function () {
-                    saveCookieToStorage("window-load");
-                });
-
-                /*
-                  Save before page unload/navigation where supported.
-                */
-                window.addEventListener("pagehide", function () {
-                    saveCookieToStorage("pagehide");
-                });
-
-                window.addEventListener("beforeunload", function () {
-                    saveCookieToStorage("beforeunload");
-                });
-            }
-
-            /*
-              Expose a small debug API in the console.
-            */
-            window.DYJSessionPersistence = {
-                config: CONFIG,
-                getCookie: function () {
-                    return getCookie(CONFIG.cookieName);
-                },
-                getStored: getStoredValueWithMeta,
-                save: function () {
-                    return saveCookieToStorage("manual-save");
-                },
-                restore: function () {
-                    return restoreStorageToCookie("manual-restore");
-                },
-                clear: removeStorageValue,
-                startWatcher: startCookieSyncWatcher
-            };
-
-            initializeDYJSessionPersistence();
+            }, 100);
         })();
     </script>
 
+    <script type="text/javascript">
+        window.DY = window.DY || {};
+        DY.recommendationContext = {type: 'HOMEPAGE', data:[]};
+    </script>
     <script type="text/javascript" src="//cdn-eu.dynamicyield.com/api/9882073/api_dynamic.js"></script>
     <script type="text/javascript" src="//cdn-eu.dynamicyield.com/api/9882073/api_static.js"></script>
-
     <script type="text/javascript">
-        const setOptanonCookie = function (val = true) {
-            window.DY = window.DY || {};
-
+        const setOptanonCookie = (val = true) => {
             DY.userActiveConsent = {
                 accepted: val
             };
+            DYO.ActiveConsent.updateConsentAcceptedStatus(val);
 
             try {
-                if (
-                    window.DYO &&
-                    DYO.ActiveConsent &&
-                    typeof DYO.ActiveConsent.updateConsentAcceptedStatus === "function"
-                ) {
-                    DYO.ActiveConsent.updateConsentAcceptedStatus(val);
-                    console.log("[Consent] DYO active consent updated:", val);
-                } else {
-                    console.warn("[Consent] DYO.ActiveConsent.updateConsentAcceptedStatus is not available yet.");
-                }
-            } catch (e) {
-                console.error("[Consent] Failed to update DYO active consent status.", e);
+                window.localStorage.setItem("userActiveConsent", val);
             }
-
-            try {
-                window.localStorage.setItem("userActiveConsent", String(val));
-                console.log("[Consent] Saved userActiveConsent to localStorage:", val);
-            } catch (e) {
-                console.error("[Consent] Could not save userActiveConsent to localStorage.", e);
+            catch (e) {
+                console.error("We couldn't save the value of the consent");
             }
         };
     </script>
-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dynamic Yield Support EU Testing Site</title>
 </head>
-
 <body>
     <!--<a href="categories/categories.html">Go to Categories</a> -->
-
     <div id="helptext">Use dy# to choose a selector for testing!</div>
-
     <div class="dy-slot" id="dy1">DY1</div>
     <div class="dy-slot" id="dy2">DY2</div>
     <div class="dy-slot" id="dy3">DY3</div>
