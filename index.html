@@ -7,67 +7,58 @@
     <link rel="preconnect" href="//rcom-eu.dynamicyield.com">
 
     <!-- ✅ DY jsession persistence — runs before DY scripts -->
-    <script type="text/javascript">
-        (function () {
-            var COOKIE_NAME = '_dyjsession';
-            var LS_KEY = 'dy_jsession_backup';
 
-            function getCookie(name) {
-                var match = document.cookie.match(
-                    new RegExp('(?:^|; )' + name + '=([^;]*)')
-                );
-                return match ? decodeURIComponent(match[1]) : null;
+<script type="text/javascript">
+    (function () {
+        var COOKIE_NAME = '_dyjsession';
+        var LS_KEY = 'dy_jsession_backup';
+
+        function setCookie(name, value, days) {
+            var date = new Date();
+            date.setTime(date.getTime() + days * 86400000);
+            document.cookie =
+                name + '=' + encodeURIComponent(value) +
+                '; expires=' + date.toUTCString() +
+                '; path=/; SameSite=Lax';
+        }
+
+        // RESTORE: set cookie from localStorage before DY loads
+        try {
+            var saved = localStorage.getItem(LS_KEY);
+            if (saved) {
+                setCookie(COOKIE_NAME, saved, 365);
+                console.log('[DY jsession] Restored cookie from localStorage:', saved);
             }
+        } catch (e) {
+            console.error('[DY jsession] localStorage read failed:', e);
+        }
 
-            function setCookie(name, value, days) {
-                var date = new Date();
-                date.setTime(date.getTime() + days * 86400000);
-                document.cookie =
-                    name + '=' + encodeURIComponent(value) +
-                    '; expires=' + date.toUTCString() +
-                    '; path=/; SameSite=Lax';
-            }
-
-            // RESTORE: set cookie from localStorage only if cookie is missing
-            var existingCookie = getCookie(COOKIE_NAME);
-
-            if (!existingCookie) {
+        // SAVE: poll for DY.jsession property (not the cookie), then back it up
+        var attempts = 0;
+        var maxAttempts = 50;
+        var pollInterval = setInterval(function () {
+            attempts++;
+            if (window.DY && DY.jsession) {
+                var value = DY.jsession;
                 try {
-                    var saved = localStorage.getItem(LS_KEY);
-                    if (saved) {
-                        setCookie(COOKIE_NAME, saved, 365);
-                        console.log('[DY jsession] Restored from localStorage:', saved);
+                    var existing = localStorage.getItem(LS_KEY);
+                    if (!existing) {
+                        localStorage.setItem(LS_KEY, value);
+                        console.log('[DY jsession] Saved to localStorage:', value);
                     } else {
-                        console.log('[DY jsession] No saved value in localStorage yet.');
+                        console.log('[DY jsession] localStorage already has value — no overwrite.');
                     }
                 } catch (e) {
-                    console.error('[DY jsession] localStorage read failed:', e);
+                    console.error('[DY jsession] localStorage write failed:', e);
                 }
-            } else {
-                console.log('[DY jsession] Cookie already present — no restore needed.');
+                clearInterval(pollInterval);
+            } else if (attempts >= maxAttempts) {
+                console.warn('[DY jsession] DY.jsession not found after ' + maxAttempts + ' polls.');
+                clearInterval(pollInterval);
             }
-
-            // SAVE: poll for cookie after DY sets it, then back it up
-            var attempts = 0;
-            var maxAttempts = 50;
-            var pollInterval = setInterval(function () {
-                attempts++;
-                var value = getCookie(COOKIE_NAME);
-                if (value) {
-                    try {
-                        localStorage.setItem(LS_KEY, value);
-                        console.log('[DY jsession] Backed up to localStorage:', value);
-                    } catch (e) {
-                        console.error('[DY jsession] localStorage write failed:', e);
-                    }
-                    clearInterval(pollInterval);
-                } else if (attempts >= maxAttempts) {
-                    console.warn('[DY jsession] Cookie not found after ' + maxAttempts + ' polls.');
-                    clearInterval(pollInterval);
-                }
-            }, 100);
-        })();
-    </script>
+        }, 100);
+    })();
+</script>
 
     <script type="text/javascript">
         window.DY = window.DY || {};
