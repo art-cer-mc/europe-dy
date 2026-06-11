@@ -59,36 +59,36 @@
         })();
     </script>
 
-    <!-- ✅ DY Active Consent — read stored consent + verify cookies before DY loads -->
+    <!-- ✅ DY Active Consent — verify consent cookie + localStorage before DY loads -->
     <script type="text/javascript">
         window.DY = window.DY || {};
         (function () {
+            var CONSENT_COOKIE = '_dy_consent_accepted';
+
+            function getConsentCookie() {
+                var match = document.cookie.match(new RegExp('(?:^|; )' + CONSENT_COOKIE + '=([^;]*)'));
+                return match ? decodeURIComponent(match[1]) : null;
+            }
+
             var storedConsent = false;
             try {
                 storedConsent = window.localStorage.getItem("userActiveConsent") === "true";
             } catch (e) {}
 
-            // Test whether cookies are actually writable
-            var cookiesEnabled = false;
-            try {
-                document.cookie = "_dy_consent_test=1; path=/; SameSite=Lax";
-                cookiesEnabled = document.cookie.indexOf("_dy_consent_test") !== -1;
-                // Clean up test cookie
-                document.cookie = "_dy_consent_test=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-            } catch (e) {}
+            var cookieConsent = getConsentCookie() === "true";
 
-            var accepted = storedConsent && cookiesEnabled;
+            // Both must agree — if the cookie was cleared, revoke consent
+            var accepted = storedConsent && cookieConsent;
 
-            // If localStorage says true but cookies are blocked, revoke stored consent
-            if (storedConsent && !cookiesEnabled) {
-                console.warn("[DY Consent] localStorage says accepted, but cookies are blocked — revoking consent.");
+            if (storedConsent && !cookieConsent) {
+                console.warn("[DY Consent] Consent cookie missing (cleared?) — revoking consent.");
                 try {
                     window.localStorage.setItem("userActiveConsent", "false");
                 } catch (e) {}
             }
 
             DY.userActiveConsent = { accepted: accepted };
-            console.log("[DY Consent] Init — stored:", storedConsent, "| cookies enabled:", cookiesEnabled, "| accepted:", accepted);
+            console.log("[DY Consent] Init — localStorage:", storedConsent, "| cookie:", cookieConsent, "| accepted:", accepted);
         })();
     </script>
 
@@ -100,20 +100,15 @@
     <script type="text/javascript" src="//cdn-eu.dynamicyield.com/api/9882073/api_static.js"></script>
     <script type="text/javascript">
         const setOptanonCookie = (val = true) => {
-            // If accepting, verify cookies are writable first
+            var CONSENT_COOKIE = '_dy_consent_accepted';
+
+            // Set or clear the consent cookie
             if (val) {
-                try {
-                    document.cookie = "_dy_consent_test=1; path=/; SameSite=Lax";
-                    var cookiesEnabled = document.cookie.indexOf("_dy_consent_test") !== -1;
-                    document.cookie = "_dy_consent_test=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-                    if (!cookiesEnabled) {
-                        console.warn("[DY Consent] Cannot accept — cookies are blocked.");
-                        return false;
-                    }
-                } catch (e) {
-                    console.warn("[DY Consent] Cookie test failed — cannot accept.");
-                    return false;
-                }
+                var date = new Date();
+                date.setTime(date.getTime() + 365 * 86400000);
+                document.cookie = CONSENT_COOKIE + '=true; expires=' + date.toUTCString() + '; path=/; SameSite=Lax';
+            } else {
+                document.cookie = CONSENT_COOKIE + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
             }
 
             DY.userActiveConsent = {
