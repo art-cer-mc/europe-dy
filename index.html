@@ -2,6 +2,18 @@
 <html lang="en">
 <head>
     <link rel="stylesheet" href="styles.css">
+    
+<script type="text/javascript">
+    window.DY = window.DY || {};
+    try {
+        DY.userActiveConsent = {
+            accepted: window.localStorage.getItem("userActiveConsent") === "true"
+        };
+    } catch (e) {
+        DY.userActiveConsent = { accepted: false };
+    }
+</script>
+
     <link rel="preconnect" href="//cdn-eu.dynamicyield.com">
     <link rel="preconnect" href="//st-eu.dynamicyield.com">
     <link rel="preconnect" href="//rcom-eu.dynamicyield.com">
@@ -66,21 +78,6 @@
     </script>
     <script type="text/javascript" src="//cdn-eu.dynamicyield.com/api/9882073/api_dynamic.js"></script>
     <script type="text/javascript" src="//cdn-eu.dynamicyield.com/api/9882073/api_static.js"></script>
-    <script type="text/javascript">
-        const setOptanonCookie = (val = true) => {
-            DY.userActiveConsent = {
-                accepted: val
-            };
-            DYO.ActiveConsent.updateConsentAcceptedStatus(val);
-
-            try {
-                window.localStorage.setItem("userActiveConsent", val);
-            }
-            catch (e) {
-                console.error("We couldn't save the value of the consent");
-            }
-        };
-    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dynamic Yield Support EU Testing Site</title>
@@ -103,5 +100,18 @@
     <div class="dy-slot" id="dy_13">DY13</div>
     <div class="dy-slot" id="dy_14">DY14</div>
     <div class="dy-slot" id="dy_15">DY15</div>
+    
+<div id="dy-consent-banner" style="
+    position: fixed; bottom: 20px; right: 20px; z-index: 99999;
+    background: #1a1a2e; color: #fff; padding: 14px 20px;
+    border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    font-family: Arial, sans-serif; font-size: 14px;
+    display: flex; align-items: center; gap: 12px;">
+    <span>DY Consent: <strong id="dy-consent-status"></strong></span>
+    <button id="dy-consent-btn" style="
+        padding: 8px 16px; border: none; border-radius: 6px;
+        font-weight: bold; font-size: 14px; cursor: pointer;"></button>
+</div>
+
 </body>
 </html>
